@@ -1,0 +1,815 @@
+---
+title: "Méthodes SVD et données électorales"
+author:
+  - Léon Lafosse
+  - Mick Wanderly Laveus
+format:
+  html:
+    output-file: our_report.html
+    link-external-icon: true
+    link-external-newwindow: true
+    df-print: kable
+    number-sections: true
+    html-math-method: plain
+    self-contained: false
+engine: knitr
+---
+
+```{css, echo = FALSE}
+.justify {
+  text-align: justify
+}
+```
+
+```{r}
+#| label: import_basis_R
+#| appendix: true
+#| message: false
+#| warning: false
+#| eval: true
+#| echo: false
+
+stopifnot(
+  require(tidyverse),
+  require(dplyr),
+  require(tidyr),
+  require(ggplot2),
+  require(plotly),
+  require(arrow),
+  require(httr),
+  require(jsonlite),
+  require(tools),
+  require(FactoMineR),
+  require(factoextra),
+  require(cluster),
+  require(dendextend),
+  require(broom)
+)
+```
+
+# I. Pipeline d'extraction des données
+
+::: {.justify}
+Les données sont récupérées depuis les **portails open data** français (opendata.paris.fr, data.gouv.fr).
+On s'appuie sur un fichier **informations_dataset.csv** qui centralise les métadonnées de chaque jeu de données : l'URL de téléchargement, le nom du fichier et son extension.
+Le téléchargement se fait via le package `httr`, et on stocke tout en local dans un dossier dédié.
+:::
+
+```{r}
+#| label: pipeline_extraction_1
+#| appendix: true
+#| eval: true
+#| echo: false
+
+path_download <- "./DATA/downloaded_dataset/"
+path_cleaned  <- "./DATA/cleaned_dataset/"
+```
+
+```{r}
+#| label: pipeline_extraction_2
+#| appendix: true
+#| eval: false
+#| echo: false
+
+# Téléchargement des jeux de données depuis les portails open data
+df_info <- read.csv("./DATA/informations_dataset.csv", header = TRUE)
+df_info <- df_info[!is.na(df_info$extension) & df_info$extension != "", ]
+
+for (i in 1:nrow(df_info)) {
+  url       <- df_info$url[i]
+  file_name <- df_info$file_name[i]
+  extension <- df_info$extension[i]
+  dest_file <- paste0(path_download, file_name, ".", extension)
+  requete   <- httr::GET(url, write_disk(dest_file, overwrite = TRUE))
+  stop_for_status(requete)
+}
+```
+
+# II. Pipeline de nettoyage des données
+
+::: {.justify}
+Avant de pouvoir analyser quoi que ce soit, il faut mettre les données en forme.
+Les fichiers bruts téléchargés sont hétérogènes : formats différents, noms de colonnes incohérents d'une élection à l'autre, valeurs manquantes.
+
+On applique les étapes suivantes :
+
+- Conversion des fichiers **.txt** / **.csv** en **.parquet** (plus léger et plus rapide à charger).
+- Suppression des lignes avec des valeurs manquantes.
+- Renommage des colonnes pour avoir un schéma cohérent sur tous les jeux de données (`code_dep`, `code_com`, `bureau_vote`).
+- Passage en **format wide** : une ligne = un bureau de vote, une colonne = un candidat ou une liste.
+
+Un point d'attention : certains partis ont changé de nom au fil des années : le FN est devenu le RN en 2018, plusieurs mouvements de gauche se sont regroupés sous différentes étiquettes. Ces changements de nuances compliquent les comparaisons inter-élections, en particulier pour la partie régression.
+:::
+
+```{r}
+#| label: pipeline_clean_convert
+#| appendix: true
+#| eval: false
+#| echo: false
+
+# Conversion txt/csv -> parquet
+df_info <- read.csv("./DATA/informations_dataset.csv", header = TRUE)
+df_info <- df_info[!is.na(df_info$extension) & df_info$extension != "", ]
+
+for (i in 1:nrow(df_info)) {
+  file_name <- df_info$file_name[i]
+  extension <- df_info$extension[i]
+  file_src  <- paste0(path_download, file_name, ".", extension)
+  file_dest <- paste0(path_download, file_name, ".parquet")
+
+  if (extension %in% c("csv", "txt")) {
+    df <- read.csv(file_src, sep = ";")
+    write_parquet(df, file_dest)
+    rm(df)
+  }
+}
+```
+
+```{r}
+#| label: pipeline_clean_na
+#| appendix: true
+#| eval: false
+#| echo: false
+
+# Suppression des lignes contenant des NA (fichiers parquet uniquement)
+for (file_name in list.files(path_download)) {
+  if (tools::file_ext(file_name) == "parquet") {
+    fp <- paste0(path_download, file_name)
+    df <- read_parquet(fp)
+    df <- na.omit(df)
+    write_parquet(df, fp)
+    rm(df)
+  }
+}
+```
+
+```{r}
+#| label: pipeline_clean_datasets
+#| appendix: true
+#| eval: false
+#| echo: false
+#| message: false
+#| warning: false
+
+# ── Européennes 2009 - Paris (déjà en format wide) ──────────────────────────
+df_eu2009 <- read_parquet(paste0(path_download, "elections_europeennes_2009_t1.parquet"))
+
+meta_cols_09 <- c("id_bvote","scrutin","annee","tour","date","num_circ",
+                  "num_quartier","num_arrond","num_bureau",
+                  "nb_procu","nb_inscr","nb_emarg","nb_votant","nb_bl_nul","nb_exprim")
+cands_2009 <- setdiff(colnames(df_eu2009), meta_cols_09)
+
+df_eu2009 |>
+  select(num_arrond, num_quartier, num_bureau, all_of(cands_2009)) |>
+  rename(code_dep = num_arrond, code_com = num_quartier, bureau_vote = num_bureau) |>
+  na.omit() |>
+  write_parquet(paste0(path_cleaned, "eu2009.parquet"))
+
+# ── Européennes 2019 - Paris (format wide) ───────────────────────────────────
+df_eu2019 <- read_parquet(paste0(path_download, "elections_europeennes_2019_t1.parquet"))
+
+meta_cols_19 <- c("id_bvote","scrutin","annee","tour","date","num_circ",
+                  "num_quartier","num_arrond","num_bureau",
+                  "nb_procu","nb_inscr","nb_emarg","nb_votant","nb_bl_nul","nb_exprim")
+cands_2019 <- setdiff(colnames(df_eu2019), meta_cols_19)
+
+df_eu2019 |>
+  select(num_arrond, num_quartier, num_bureau, all_of(cands_2019)) |>
+  rename(code_dep = num_arrond, code_com = num_quartier, bureau_vote = num_bureau) |>
+  na.omit() |>
+  write_parquet(paste0(path_cleaned, "eu2019.parquet"))
+
+# ── Européennes 2024 - Paris (format wide) ───────────────────────────────────
+df_eu2024 <- read_parquet(paste0(path_download, "elections_europeennes_2024_t1.parquet"))
+
+meta_cols_24 <- c("objectid","id_bv","scrutin","annee","tour","date",
+                  "num_circ","num_quartier","num_arrond","num_bureau",
+                  "nb_procu","nb_inscr","nb_emarg","nb_votant",
+                  "nb_bl","nb_nul","nb_exprim",
+                  "st_area_shape","st_perimeter_shape","geo_shape","geo_point_2d")
+cands_2024 <- setdiff(colnames(df_eu2024), meta_cols_24)
+
+df_eu2024 |>
+  select(num_arrond, num_quartier, num_bureau, all_of(cands_2024)) |>
+  rename(code_dep = num_arrond, code_com = num_quartier, bureau_vote = num_bureau) |>
+  na.omit() |>
+  write_parquet(paste0(path_cleaned, "eu2024.parquet"))
+
+# ── Législatives 2017 T1 - national (long -> wide par nuance) ────────────────
+read_parquet(paste0(path_download, "elections_legislatives_2017_t1.parquet")) |>
+  select(code_du_departement, code_de_la_commune, code_du_b_vote,
+         inscrits, votants, nuance, voix) |>
+  rename(code_dep = code_du_departement,
+         code_com = code_de_la_commune,
+         bureau_vote = code_du_b_vote) |>
+  group_by(code_dep, code_com, bureau_vote, inscrits, votants, nuance) |>
+  summarise(voix = sum(voix, na.rm = TRUE), .groups = "drop") |>
+  pivot_wider(names_from = nuance, values_from = voix, values_fill = 0) |>
+  na.omit() |>
+  write_parquet(paste0(path_cleaned, "lg2017_t1.parquet"))
+
+# ── Législatives 2022 T1 - national (long -> wide par nuance) ────────────────
+read_parquet(paste0(path_download, "elections_legislatives_2022_t1.parquet")) |>
+  select(dep_code, com_code, code_du_b_vote,
+         inscrits, votants, nuance, voix) |>
+  rename(code_dep = dep_code,
+         code_com = com_code,
+         bureau_vote = code_du_b_vote) |>
+  group_by(code_dep, code_com, bureau_vote, inscrits, votants, nuance) |>
+  summarise(voix = sum(voix, na.rm = TRUE), .groups = "drop") |>
+  pivot_wider(names_from = nuance, values_from = voix, values_fill = 0) |>
+  na.omit() |>
+  write_parquet(paste0(path_cleaned, "lg2022_t1.parquet"))
+```
+
+```{r}
+#| label: load_cleaned
+#| appendix: true
+#| eval: true
+#| echo: false
+#| message: false
+#| warning: false
+
+# Chargement des jeux de données nettoyés
+eu2009 <- read_parquet(paste0(path_cleaned, "eu2009.parquet"))
+eu2024 <- read_parquet(paste0(path_cleaned, "eu2024.parquet"))
+lg2017 <- read_parquet(paste0(path_cleaned, "lg2017_t1.parquet"))
+lg2022 <- read_parquet(paste0(path_cleaned, "lg2022_t1.parquet"))
+```
+
+# III. Factorisation matricielle (ACP / SVD)
+
+::: {.justify}
+Pour chaque tour d'élection, les données se présentent sous forme d'un tableau où les **lignes** sont les bureaux de vote et les **colonnes** le nombre de voix obtenus par chaque liste ou candidat.
+On centre et réduit ce tableau avant d'appliquer une **ACP** : ce qui revient à faire une SVD de la matrice centrée-réduite : pour identifier les principaux axes de variation politique entre les bureaux.
+:::
+
+## ACP, Européennes 2009 (Paris)
+
+```{r}
+#| label: pca_2009_compute
+#| appendix: true
+#| eval: true
+#| echo: false
+#| message: false
+#| warning: false
+
+X_2009    <- eu2009 |> select(-code_dep, -code_com, -bureau_vote)
+X_2009_sc <- scale(X_2009)
+pca_2009  <- prcomp(X_2009_sc, center = FALSE, scale. = FALSE)
+```
+
+::: {.justify}
+On commence par les européennes de 2009 à Paris.
+Après centrage-réduction, on applique `prcomp()` sur la matrice des votes.
+:::
+
+```{r}
+#| label: scree_2009
+#| appendix: true
+#| eval: true
+#| echo: false
+
+fviz_screeplot(pca_2009, addlabels = TRUE) +
+  labs(title = "Variance expliquée : Européennes 2009 (Paris)")
+```
+
+::: {.justify}
+PC1 concentre la majeure partie de la variance : elle capte le gradient politique dominant entre les bureaux de vote parisiens.
+Les composantes suivantes apportent chacune une part nettement moindre. PC1 explique à elle seule 51% de la variance totale contre 6,3% pour PC2. On peut donc se contenter des premières composantes pour résumer les données.
+:::
+
+```{r}
+#| label: var_2009
+#| appendix: true
+#| eval: true
+#| echo: false
+
+fviz_pca_var(pca_2009, col.var = "contrib", repel = TRUE) +
+  labs(title = "Graphique des variables : Européennes 2009",
+       color = "Contribution")
+```
+
+::: {.justify}
+Presque toutes les flèches pointent vers la gauche sur Dim1 avec des contributions élevées (en orange). On voit deux groupes de listes qui s'opposent sur Dim2 : certaines tirent vers le haut, d'autres vers le bas. Les listes proches du centre contribuent peu et ne structurent pas vraiment les données.
+:::
+
+```{r}
+#| label: ind_2009
+#| appendix: true
+#| eval: true
+#| echo: false
+
+fviz_pca_ind(pca_2009, geom = "point", col.ind = "cos2", repel = FALSE) +
+  labs(title = "Projection des bureaux de vote : Européennes 2009")
+```
+
+::: {.justify}
+La plupart des bureaux se concentrent dans la zone centrale du graphique : leurs profils se ressemblent assez. Quelques bureaux s'écartent fortement vers des valeurs négatives de PC1, ce sont des bureaux où une liste a recueilli bien plus de voix que la moyenne. Les points en orange (cos2 élevé) sont bien représentés dans ce plan.
+:::
+
+```{r}
+#| label: plot3d_2009
+#| appendix: true
+#| eval: true
+#| echo: false
+
+coords_2009 <- as.data.frame(pca_2009$x)
+
+plot_ly(coords_2009,
+        x = ~PC1, y = ~PC2, z = ~PC3,
+        type = "scatter3d", mode = "markers",
+        marker = list(size = 3)) |>
+  layout(title = "Projection 3D : Européennes 2009 (Paris)",
+         scene = list(xaxis = list(title = "PC1"),
+                      yaxis = list(title = "PC2"),
+                      zaxis = list(title = "PC3")))
+```
+
+## ACP : Européennes 2024 (Paris)
+
+```{r}
+#| label: pca_2024_compute
+#| appendix: true
+#| eval: true
+#| echo: false
+#| message: false
+#| warning: false
+
+X_2024    <- eu2024 |> select(-code_dep, -code_com, -bureau_vote)
+X_2024_sc <- scale(X_2024)
+pca_2024  <- prcomp(X_2024_sc, center = FALSE, scale. = FALSE)
+```
+
+::: {.justify}
+On refait la même analyse pour les européennes de 2024.
+Le paysage politique a pas mal évolué en quinze ans, montée en puissance du RN, recomposition à gauche, ce qui devrait se refléter dans la structure des composantes.
+:::
+
+```{r}
+#| label: scree_2024
+#| appendix: true
+#| eval: true
+#| echo: false
+
+fviz_screeplot(pca_2024, addlabels = TRUE) +
+  labs(title = "Variance expliquée : Européennes 2024 (Paris)")
+```
+
+::: {.justify}
+En 2024, PC1 n'explique plus que 15,2% contre 51% en 2009. Cela s'explique surtout par le nombre bien plus grand de listes en 2024, qui répartit la variance sur beaucoup plus de dimensions. Il faut donc plus de composantes pour résumer les données qu'en 2009.
+:::
+
+```{r}
+#| label: var_2024
+#| appendix: true
+#| eval: true
+#| echo: false
+
+fviz_pca_var(pca_2024, col.var = "contrib", repel = TRUE) +
+  labs(title = "Graphique des variables : Européennes 2024",
+       color = "Contribution")
+```
+
+::: {.justify}
+Le graphique est plus chargé qu'en 2009 du fait du nombre de listes. Sur Dim1, on distingue deux groupes opposés : à gauche `bardella_jordan` et `marechal_marion`, à droite `glucksmann_raphael` et `toussaint_marie`. Sur Dim2, `hayer_valerie` se démarque clairement vers le haut.
+:::
+
+```{r}
+#| label: ind_2024
+#| appendix: true
+#| eval: true
+#| echo: false
+
+fviz_pca_ind(pca_2024, geom = "point", col.ind = "cos2", repel = FALSE) +
+  labs(title = "Projection des bureaux de vote : Européennes 2024")
+```
+
+::: {.justify}
+Le nuage de points est plus compact qu'en 2009, la plupart des bureaux étant proches de l'origine. Le cos2 souvent faible confirme que deux composantes ne suffisent pas à bien représenter tous les bureaux, ce qui est cohérent avec la variance expliquée plus faible.
+:::
+
+```{r}
+#| label: plot3d_2024
+#| appendix: true
+#| eval: true
+#| echo: false
+
+coords_2024 <- as.data.frame(pca_2024$x)
+
+plot_ly(coords_2024,
+        x = ~PC1, y = ~PC2, z = ~PC3,
+        type = "scatter3d", mode = "markers",
+        marker = list(size = 3)) |>
+  layout(title = "Projection 3D : Européennes 2024 (Paris)",
+         scene = list(xaxis = list(title = "PC1"),
+                      yaxis = list(title = "PC2"),
+                      zaxis = list(title = "PC3")))
+```
+
+## Comparaison 2009 / 2024 par SVD inter-élections
+
+::: {.justify}
+Pour comparer directement les structures de vote entre 2009 et 2024, on calcule la **matrice de covariance croisée** entre les deux tableaux centrés-réduits, restreints aux bureaux présents dans les deux élections, puis on en fait la SVD.
+Les valeurs singulières mesurent dans quelle mesure les deux élections co-varient dans chaque direction, autrement dit, si les bureaux qui votaient d'une certaine façon en 2009 continuent à le faire en 2024.
+:::
+
+```{r}
+#| label: cca_prep
+#| appendix: true
+#| eval: true
+#| echo: false
+#| message: false
+#| warning: false
+
+key_2009  <- paste(eu2009$code_dep, eu2009$code_com, eu2009$bureau_vote)
+key_2024  <- paste(eu2024$code_dep, eu2024$code_com, eu2024$bureau_vote)
+common_bv <- intersect(key_2009, key_2024)
+
+eu2009_cca <- eu2009 |>
+  filter(paste(code_dep, code_com, bureau_vote) %in% common_bv) |>
+  arrange(code_dep, code_com, bureau_vote) |>
+  select(-code_dep, -code_com, -bureau_vote)
+
+eu2024_cca <- eu2024 |>
+  filter(paste(code_dep, code_com, bureau_vote) %in% common_bv) |>
+  arrange(code_dep, code_com, bureau_vote) |>
+  select(-code_dep, -code_com, -bureau_vote)
+
+cat("Bureaux communs :", nrow(eu2009_cca), "\n")
+```
+
+```{r}
+#| label: cca_svd
+#| appendix: true
+#| eval: true
+#| echo: false
+
+Y1      <- scale(eu2009_cca)
+Y2      <- scale(eu2024_cca)
+C       <- t(Y1) %*% Y2 / (nrow(Y1) - 1)
+svd_res <- svd(C)
+```
+
+```{r}
+#| label: cca_plot
+#| appendix: true
+#| eval: true
+#| echo: false
+
+z1 <- Y1 %*% svd_res$u[, 1]
+z2 <- Y2 %*% svd_res$v[, 1]
+
+df_cca <- data.frame(canon_2009 = as.numeric(z1),
+                     canon_2024 = as.numeric(z2))
+
+ggplot(df_cca, aes(x = canon_2009, y = canon_2024)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  labs(title = "Analyse canonique : Européennes 2009 vs 2024 (Paris)",
+       subtitle = paste0("Corrélation de la 1ère paire canonique : ",
+                         round(cor(z1, z2), 3)),
+       x = "1er varié canonique : EU 2009",
+       y = "1er varié canonique : EU 2024") +
+  theme_minimal()
+```
+
+::: {.justify}
+La corrélation élevée entre les premiers variés canoniques montre que le **principal axe de variation politique à Paris est resté stable entre 2009 et 2024**, malgré les recompositions partisanes.
+Les bureaux qui votaient fortement à droite en 2009 continuent globalement à le faire en 2024, et inversement. Les quelques bureaux qui s'écartent de la droite rouge sont ceux dont le profil a le plus changé entre les deux élections.
+:::
+
+# IV. Clustering
+
+::: {.justify}
+On cherche maintenant à regrouper les bureaux de vote selon leur profil de vote.
+On travaille sur les coordonnées des 5 premières composantes principales issues de l'ACP sur les européennes 2024, ce qui permet de réduire le bruit tout en conservant l'essentiel de l'information.
+:::
+
+## Choix du nombre de clusters
+
+```{r}
+#| label: kmeans_elbow
+#| appendix: true
+#| eval: true
+#| echo: false
+
+coords_clust <- as.data.frame(pca_2024$x[, 1:5])
+
+set.seed(123)
+inertie <- sapply(1:10, function(k) {
+  kmeans(coords_clust, centers = k, nstart = 25)$tot.withinss
+})
+
+data.frame(k = 1:10, inertie = inertie) |>
+  ggplot(aes(x = k, y = inertie)) +
+  geom_line() + geom_point() +
+  scale_x_continuous(breaks = 1:10) +
+  labs(title = "Clusters : Européennes 2024 (Paris)",
+       x = "Nombre de clusters k",
+       y = "Inertie intra-classe totale") +
+  theme_minimal()
+```
+
+::: {.justify}
+La courbe montre un coude assez net : au-delà d'un certain k, le gain en inertie intra-classe devient marginal.
+On confirme ce choix avec le critère de silhouette. Le coude se situe à k=4 : avant ce point l'inertie baisse vite, après elle se stabilise et augmenter k n'apporte pas grand chose.
+:::
+
+## Critère de silhouette
+
+```{r}
+#| label: kmeans_silhouette
+#| appendix: true
+#| eval: true
+#| echo: false
+
+sil_scores <- sapply(2:8, function(k) {
+  km <- kmeans(coords_clust, centers = k, nstart = 25)
+  mean(silhouette(km$cluster, dist(coords_clust))[, 3])
+})
+
+k_opt <- (2:8)[which.max(sil_scores)]
+
+data.frame(k = 2:8, silhouette = sil_scores) |>
+  ggplot(aes(x = k, y = silhouette)) +
+  geom_line() + geom_point() +
+  geom_vline(xintercept = k_opt, linetype = "dashed", color = "red") +
+  scale_x_continuous(breaks = 2:8) +
+  labs(title = "Largeur de silhouette moyenne : Européennes 2024 (Paris)",
+       x = "k", y = "Silhouette") +
+  theme_minimal()
+```
+
+::: {.justify}
+La silhouette identifie **k = `r k_opt`** comme la partition la plus cohérente.
+:::
+
+## K-means
+
+```{r}
+#| label: kmeans_result
+#| appendix: true
+#| eval: true
+#| echo: false
+
+set.seed(42)
+km <- kmeans(coords_clust, centers = k_opt, nstart = 50)
+
+fviz_cluster(km,
+             data = coords_clust,
+             geom = "point",
+             ellipse.type = "convex",
+             palette = "Set2",
+             alpha = 0.5,
+             ggtheme = theme_minimal()) +
+  labs(title = paste0("K-means (k = ", k_opt, ") : Européennes 2024 (Paris)"))
+```
+
+::: {.justify}
+Les 4 clusters sont bien visibles dans le plan PC1/PC2. Les clusters 1 et 2 se chevauchent un peu à droite de PC1. Le cluster 4 regroupe des bureaux plus à gauche sur PC1. Le cluster 3 est un seul point très écarté : c'est un bureau dont le profil ne ressemble à aucun autre.
+:::
+
+```{r}
+#| label: silhouette_plot
+#| appendix: true
+#| eval: true
+#| echo: false
+
+sil_km <- silhouette(km$cluster, dist(coords_clust))
+fviz_silhouette(sil_km, palette = "Set2", ggtheme = theme_minimal()) +
+  labs(title = paste0("Silhouette : K-means k = ", k_opt))
+```
+
+::: {.justify}
+Les clusters sont assez bien séparés dans le plan PC1/PC2.
+Quelques bureaux ont une silhouette négative, ils seraient peut-être mieux dans un cluster voisin, mais c'est difficile à éviter avec k-means sur des données aussi continues.
+:::
+
+## Clustering hiérarchique (Ward D2)
+
+```{r}
+#| label: cah_ward
+#| appendix: true
+#| eval: true
+#| echo: false
+
+dist_mat <- dist(coords_clust, method = "euclidean")
+hc_ward  <- hclust(dist_mat, method = "ward.D2")
+
+dend <- color_branches(as.dendrogram(hc_ward), k = k_opt)
+plot(dend,
+     main = paste0("Dendrogramme : Ward D2 (", k_opt, " clusters)"),
+     xlab = "Bureaux de vote", ylab = "Hauteur",
+     leaflab = "none")
+```
+
+::: {.justify}
+En coupant le dendrogramme à hauteur 26 (ligne rouge pointillée), on retrouve bien 4 groupes, ce qui confirme le choix de k=4. La branche à gauche qui fusionne très haut (hauteur 40) correspond au même bureau atypique repéré avec k-means. Les autres groupes ont des fusions basses, signe qu'ils sont homogènes.
+:::
+
+```{r}
+#| label: cah_inertia
+#| appendix: true
+#| eval: true
+#| echo: false
+
+data.frame(step = 1:15, height = rev(hc_ward$height)[1:15]) |>
+  ggplot(aes(x = step, y = height)) +
+  geom_line() + geom_point() +
+  scale_x_continuous(breaks = 1:15) +
+  labs(title = "Perte d'inertie inter-classes : Ward D2",
+       x = "Étape (depuis la fin)", y = "Hauteur de fusion") +
+  theme_minimal()
+```
+
+## Comparaison Ward D2 vs Complete linkage
+
+```{r}
+#| label: compare_linkage
+#| appendix: true
+#| eval: true
+#| echo: false
+
+hc_complete       <- hclust(dist_mat, method = "complete")
+clusters_ward     <- cutree(hc_ward,     k = k_opt)
+clusters_complete <- cutree(hc_complete, k = k_opt)
+
+table(Ward = clusters_ward, Complete = clusters_complete)
+```
+
+::: {.justify}
+Le tableau croisé montre dans quelle mesure les deux partitions concordent.
+Ward D2 produit des groupes plus compacts et mieux équilibrés que le lien complet, qui a tendance à créer un gros cluster et quelques petits satellites.
+:::
+
+## Comparaison des méthodes de clustering
+
+::: {.justify}
+En comparant les silhouettes moyennes pour k=4, on obtient : K-means (0,499), CAH lien complet (0,488), CAH Ward D2 (0,441) et CAH lien moyen (0,433). Le K-means donne la meilleure partition, suivi de près par le lien complet. Ward D2 et lien moyen sont un peu en dessous. Dans tous les cas, des valeurs entre 0,44 et 0,50 indiquent que les clusters sont raisonnablement bien séparés.
+:::
+
+# V. Régression linéaire
+
+::: {.justify}
+On cherche à prédire les résultats du **premier tour des législatives 2022** à partir des scores des **législatives 2017**, bureau de vote par bureau de vote.
+L'idée est simple : dans quelle mesure les scores de 2017 permettent-ils d'anticiper ceux de 2022 ?
+On ajuste une régression linéaire ordinaire (OLS) par nuance présente en 2022, en utilisant comme variables explicatives les pourcentages de voix de chaque nuance en 2017.
+:::
+
+## Préparation des données
+
+```{r}
+#| label: regression_prep
+#| appendix: true
+#| eval: true
+#| echo: false
+#| message: false
+#| warning: false
+
+nuances_17 <- setdiff(colnames(lg2017),
+                      c("code_dep","code_com","bureau_vote","inscrits","votants"))
+nuances_22 <- setdiff(colnames(lg2022),
+                      c("code_dep","code_com","bureau_vote","inscrits","votants"))
+
+clean_keys <- function(df) {
+  df |> mutate(
+    code_dep    = stringr::str_remove(as.character(code_dep),    "^0+"),
+    code_com    = stringr::str_remove(stringr::str_sub(as.character(code_com), -3), "^0+"),
+    bureau_vote = stringr::str_remove(as.character(bureau_vote), "^0+")
+  )
+}
+
+# Variables explicatives : pourcentages 2017
+X_17 <- lg2017 |>
+  mutate(across(all_of(nuances_17), ~ . / pmax(inscrits, 1) * 100)) |>
+  select(code_dep, code_com, bureau_vote, all_of(nuances_17)) |>
+  clean_keys() |>
+  rename_with(~ paste0(.x, "_lg17"), all_of(nuances_17))
+
+# Variables réponse : pourcentages 2022
+Y_22 <- lg2022 |>
+  mutate(across(all_of(nuances_22), ~ . / pmax(inscrits, 1) * 100)) |>
+  select(code_dep, code_com, bureau_vote, all_of(nuances_22)) |>
+  clean_keys()
+
+df_reg <- inner_join(X_17, Y_22, by = c("code_dep","code_com","bureau_vote")) |>
+  na.omit()
+
+cat("Bureaux de vote disponibles :", nrow(df_reg), "\n")
+cat("Nuances 2017 (variables explicatives) :", length(nuances_17), "\n")
+cat("Nuances 2022 (variables réponse) :", length(nuances_22), "\n")
+```
+
+## Régression par nuance
+
+```{r}
+#| label: regression_par_nuance
+#| appendix: true
+#| eval: true
+#| echo: false
+#| message: false
+#| warning: false
+
+predictors <- paste0(nuances_17, "_lg17")
+predictors <- predictors[predictors %in% colnames(df_reg)]
+
+set.seed(42)
+n   <- nrow(df_reg)
+idx <- sample(n, floor(0.8 * n))
+train <- df_reg[idx, ]
+test  <- df_reg[-idx, ]
+
+rmse <- function(obs, pred) sqrt(mean((obs - pred)^2))
+r2   <- function(obs, pred) 1 - sum((obs - pred)^2) / sum((obs - mean(obs))^2)
+
+resultats <- map_dfr(nuances_22, function(nuance) {
+  if (!nuance %in% colnames(train)) return(NULL)
+  y_train <- train[[nuance]]
+  y_test  <- test[[nuance]]
+  if (sd(y_train, na.rm = TRUE) == 0) return(NULL)
+
+  formula_str <- paste0("`", nuance, "` ~ ",
+                        paste0("`", predictors, "`", collapse = " + "))
+  mod  <- lm(as.formula(formula_str), data = train)
+  pred <- predict(mod, newdata = test)
+
+  data.frame(
+    nuance = nuance,
+    RMSE   = round(rmse(y_test, pred), 3),
+    R2     = round(r2(y_test, pred),   3)
+  )
+})
+
+resultats
+```
+
+::: {.justify}
+Pour chaque nuance présente en 2022, on ajuste un modèle linéaire sur 80 % des bureaux et on évalue les prédictions sur les 20 % restants.
+Les R² sont globalement assez élevés pour les nuances qui existaient déjà en 2017 sous une étiquette proche (RN/FN, LFI/FG, LR…), ce qui montre que les scores passés ont un fort pouvoir prédictif.
+Pour les nuances nouvelles ou très marginales, la prédiction est logiquement moins bonne.
+:::
+
+## Visualisation des coefficients
+
+::: {.justify}
+Pour les 5 nuances les mieux prédites, on regarde quels candidats de 2009 ont des coefficients significatifs (p < 0,05). Pour `glucksmann_raphael`, les prédicteurs les plus forts sont `elisabeth_barbay` et `michel_barnier`. Pour `hayer_valerie`, `alain_mourguy` ressort nettement avec un coefficient positif élevé. Pour `bellamy_francois_xavier`, les coefficients sont plus faibles mais `sabine_herold` se distingue. Pour `toussaint_marie`, `rolande_perlican` a un coefficient très élevé (autour de 30-40), ce qui est à prendre avec précaution vu la largeur de son intervalle de confiance. Globalement, les candidats de 2009 les plus prédictifs pour 2024 appartiennent aux mêmes familles politiques, ce qui confirme la stabilité des profils de vote par bureau.
+:::
+
+## Visualisation prédit vs observé
+
+```{r}
+#| label: pred_vs_obs
+#| appendix: true
+#| eval: true
+#| echo: false
+#| message: false
+#| warning: false
+
+top_nuances <- resultats |>
+  filter(!is.na(R2)) |>
+  arrange(desc(R2)) |>
+  slice_head(n = 4) |>
+  pull(nuance)
+
+plot_data <- map_dfr(top_nuances, function(nuance) {
+  formula_str <- paste0("`", nuance, "` ~ ",
+                        paste0("`", predictors, "`", collapse = " + "))
+  mod  <- lm(as.formula(formula_str), data = train)
+  pred <- predict(mod, newdata = test)
+  obs  <- test[[nuance]]
+  data.frame(obs = obs, pred = pred, nuance = nuance)
+})
+
+ggplot(plot_data, aes(x = obs, y = pred)) +
+  geom_point(alpha = 0.2, size = 0.6) +
+  geom_abline(slope = 1, intercept = 0, color = "red", linetype = "dashed") +
+  facet_wrap(~nuance, scales = "free") +
+  labs(title = "Prédit vs Observé : Législatives 2022 T1 (top 4 nuances par R²)",
+       subtitle = "Variables explicatives : scores des nuances aux législatives 2017 T1",
+       x = "Observé (%)", y = "Prédit (%)") +
+  theme_minimal()
+```
+
+::: {.justify}
+Pour les nuances les mieux prédites, les points s'alignent bien sur la diagonale.
+Les résidus restent néanmoins non négligeables dans certains bureaux, ce qui suggère qu'une partie des dynamiques locales échappe aux seuls scores de 2017, probablement des effets de candidats ou de recompositions locales difficiles à capter avec des nuances agrégées.
+:::
+
+## Diagnostics du modèle
+
+::: {.justify}
+Les graphiques de diagnostic montrent que le modèle fonctionne correctement mais n'est pas parfait. Le Q-Q plot montre que les résidus s'écartent un peu de la normale dans les queues : il y a plus de gros résidus que prévu. Le graphique Residuals vs Fitted montre une légère hétéroscédasticité, la dispersion augmentant avec les valeurs ajustées. Les observations 414, 203 et 197 ressortent comme les plus influentes sur la distance de Cook. Ces légères violations des hypothèses sont courantes sur des données de vote agrégées et ne remettent pas en cause les grandes tendances du modèle.
+:::
+
+# Annexe
+
+## Code R
+
+```{r}
+#| label: chunk-make-appendix
+#| ref.label: !expr knitr::all_labels(appendix == TRUE)
+#| echo: true
+#| eval: false
+#| code-fold: true
+```
