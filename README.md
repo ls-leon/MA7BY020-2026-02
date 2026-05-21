@@ -23,10 +23,9 @@ install.packages(c(
 
 ### Méthode 
 ```bash
-cd projet_elections
-quarto render out_report.qmd
+quarto render our_report.qmd
 ```
 
 ## Résultat
-Le fichier `out_report.html` est généré dans le même dossier.
+Le fichier `our_report.html` est généré dans le même dossier.
 

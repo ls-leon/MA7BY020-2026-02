@@ -12,6 +12,17 @@ format:
     number-sections: true
     html-math-method: plain
     self-contained: false
+  pdf:
+    output-file: our_report.pdf
+    number-sections: true
+    toc: true
+    toc-depth: 3
+    geometry:
+      - margin=2.5cm
+    include-in-header:
+      text: |
+        \usepackage{float}
+        \floatplacement{figure}{H}
 engine: knitr
 ---
 
@@ -237,6 +248,52 @@ lg2017 <- read_parquet(paste0(path_cleaned, "lg2017_t1.parquet"))
 lg2022 <- read_parquet(paste0(path_cleaned, "lg2022_t1.parquet"))
 ```
 
+## Aperçu des données après nettoyage
+
+::: {.justify}
+Voici un aperçu des quatre jeux de données une fois nettoyés et mis au format wide. Chaque ligne correspond à un bureau de vote, identifié par `code_dep`, `code_com` et `bureau_vote`. Les colonnes suivantes donnent le nombre de voix (ou le pourcentage, selon le jeu de données) par liste ou nuance.
+:::
+
+**Européennes 2009 — Paris** (`r nrow(eu2009)` bureaux, `r ncol(eu2009) - 3` listes)
+
+```{r}
+#| label: apercu_eu2009
+#| appendix: true
+#| eval: true
+#| echo: false
+head(eu2009, 5)
+```
+
+**Européennes 2024 — Paris** (`r nrow(eu2024)` bureaux, `r ncol(eu2024) - 3` listes)
+
+```{r}
+#| label: apercu_eu2024
+#| appendix: true
+#| eval: true
+#| echo: false
+head(eu2024, 5)
+```
+
+**Législatives 2017 T1 — national** (`r nrow(lg2017)` bureaux, `r ncol(lg2017) - 5` nuances)
+
+```{r}
+#| label: apercu_lg2017
+#| appendix: true
+#| eval: true
+#| echo: false
+head(lg2017, 5)
+```
+
+**Législatives 2022 T1 — national** (`r nrow(lg2022)` bureaux, `r ncol(lg2022) - 5` nuances)
+
+```{r}
+#| label: apercu_lg2022
+#| appendix: true
+#| eval: true
+#| echo: false
+head(lg2022, 5)
+```
+
 # III. Factorisation matricielle (ACP / SVD)
 
 ::: {.justify}
@@ -316,14 +373,23 @@ La plupart des bureaux se concentrent dans la zone centrale du graphique : leurs
 
 coords_2009 <- as.data.frame(pca_2009$x)
 
-plot_ly(coords_2009,
-        x = ~PC1, y = ~PC2, z = ~PC3,
-        type = "scatter3d", mode = "markers",
-        marker = list(size = 3)) |>
-  layout(title = "Projection 3D : Européennes 2009 (Paris)",
-         scene = list(xaxis = list(title = "PC1"),
-                      yaxis = list(title = "PC2"),
-                      zaxis = list(title = "PC3")))
+if (knitr::is_html_output()) {
+  plot_ly(coords_2009,
+          x = ~PC1, y = ~PC2, z = ~PC3,
+          type = "scatter3d", mode = "markers",
+          marker = list(size = 3)) |>
+    layout(title = "Projection 3D : Européennes 2009 (Paris)",
+           scene = list(xaxis = list(title = "PC1"),
+                        yaxis = list(title = "PC2"),
+                        zaxis = list(title = "PC3")))
+} else {
+  ggplot(coords_2009, aes(x = PC1, y = PC2, color = PC3)) +
+    geom_point(size = 1.2, alpha = 0.6) +
+    scale_color_viridis_c(name = "PC3") +
+    labs(title = "Projection PC1 vs PC2 (couleur = PC3) : Européennes 2009 (Paris)",
+         x = "PC1", y = "PC2") +
+    theme_minimal()
+}
 ```
 
 ## ACP : Européennes 2024 (Paris)
@@ -397,14 +463,23 @@ Le nuage de points est plus compact qu'en 2009, la plupart des bureaux étant pr
 
 coords_2024 <- as.data.frame(pca_2024$x)
 
-plot_ly(coords_2024,
-        x = ~PC1, y = ~PC2, z = ~PC3,
-        type = "scatter3d", mode = "markers",
-        marker = list(size = 3)) |>
-  layout(title = "Projection 3D : Européennes 2024 (Paris)",
-         scene = list(xaxis = list(title = "PC1"),
-                      yaxis = list(title = "PC2"),
-                      zaxis = list(title = "PC3")))
+if (knitr::is_html_output()) {
+  plot_ly(coords_2024,
+          x = ~PC1, y = ~PC2, z = ~PC3,
+          type = "scatter3d", mode = "markers",
+          marker = list(size = 3)) |>
+    layout(title = "Projection 3D : Européennes 2024 (Paris)",
+           scene = list(xaxis = list(title = "PC1"),
+                        yaxis = list(title = "PC2"),
+                        zaxis = list(title = "PC3")))
+} else {
+  ggplot(coords_2024, aes(x = PC1, y = PC2, color = PC3)) +
+    geom_point(size = 1.2, alpha = 0.6) +
+    scale_color_viridis_c(name = "PC3") +
+    labs(title = "Projection PC1 vs PC2 (couleur = PC3) : Européennes 2024 (Paris)",
+         x = "PC1", y = "PC2") +
+    theme_minimal()
+}
 ```
 
 ## Comparaison 2009 / 2024 par SVD inter-élections
