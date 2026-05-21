@@ -23,7 +23,7 @@ install.packages(c(
 
 ### Méthode 
 ```bash
-quarto render our_report.qmd
+quarto render our_report.qmd --to html
 ```
 
 ## Résultat

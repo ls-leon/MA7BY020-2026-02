@@ -11,7 +11,7 @@ format:
     df-print: kable
     number-sections: true
     html-math-method: plain
-    self-contained: false
+    self-contained: true
   pdf:
     output-file: our_report.pdf
     number-sections: true
