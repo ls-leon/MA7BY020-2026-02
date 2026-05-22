@@ -3417,7 +3417,7 @@ Ward   1   2
 <pre><code>Bureaux de vote disponibles : 44821 </code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
-<pre><code>Nuances 2017 (variables explicatives) : 17 </code></pre>
+<pre><code>Pourcentage de voix de chaque nuances en 2017 (variables explicatives) : 17 </code></pre>
 </div>
 <div class="cell-output cell-output-stdout">
 <pre><code>Nuances 2022 (variables réponse) : 16 </code></pre>
@@ -3839,7 +3839,7 @@ Ward   1   2
 <span id="cb9-280"><a href="#cb9-280" aria-hidden="true" tabindex="-1"></a>  <span class="fu">na.omit</span>()</span>
 <span id="cb9-281"><a href="#cb9-281" aria-hidden="true" tabindex="-1"></a></span>
 <span id="cb9-282"><a href="#cb9-282" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">&quot;Bureaux de vote disponibles :&quot;</span>, <span class="fu">nrow</span>(df_reg), <span class="st">&quot;</span><span class="sc">\n</span><span class="st">&quot;</span>)</span>
-<span id="cb9-283"><a href="#cb9-283" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">&quot;Nuances 2017 (variables explicatives) :&quot;</span>, <span class="fu">length</span>(nuances_17), <span class="st">&quot;</span><span class="sc">\n</span><span class="st">&quot;</span>)</span>
+<span id="cb9-283"><a href="#cb9-283" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">&quot;Pourcentage de voix de chaque nuances en 2017 (variables explicatives) :&quot;</span>, <span class="fu">length</span>(nuances_17), <span class="st">&quot;</span><span class="sc">\n</span><span class="st">&quot;</span>)</span>
 <span id="cb9-284"><a href="#cb9-284" aria-hidden="true" tabindex="-1"></a><span class="fu">cat</span>(<span class="st">&quot;Nuances 2022 (variables réponse) :&quot;</span>, <span class="fu">length</span>(nuances_22), <span class="st">&quot;</span><span class="sc">\n</span><span class="st">&quot;</span>)</span>
 <span id="cb9-285"><a href="#cb9-285" aria-hidden="true" tabindex="-1"></a>predictors <span class="ot">&lt;-</span> <span class="fu">paste0</span>(nuances_17, <span class="st">&quot;_lg17&quot;</span>)</span>
 <span id="cb9-286"><a href="#cb9-286" aria-hidden="true" tabindex="-1"></a>predictors <span class="ot">&lt;-</span> predictors[predictors <span class="sc">%in%</span> <span class="fu">colnames</span>(df_reg)]</span>

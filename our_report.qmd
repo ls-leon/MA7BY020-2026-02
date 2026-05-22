@@ -721,7 +721,7 @@ df_reg <- inner_join(X_17, Y_22, by = c("code_dep","code_com","bureau_vote")) |>
   na.omit()
 
 cat("Bureaux de vote disponibles :", nrow(df_reg), "\n")
-cat("Nuances 2017 (variables explicatives) :", length(nuances_17), "\n")
+cat("Pourcentage de voix de chaque nuances en 2017 (variables explicatives) :", length(nuances_17), "\n")
 cat("Nuances 2022 (variables réponse) :", length(nuances_22), "\n")
 ```
 
