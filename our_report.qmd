@@ -676,9 +676,7 @@ En comparant les silhouettes moyennes pour k=4, on obtient : K-means (0,499), CA
 # V. Régression linéaire
 
 ::: {.justify}
-On cherche à prédire les résultats du **premier tour des législatives 2022** à partir des scores des **législatives 2017**, bureau de vote par bureau de vote.
-L'idée est simple : dans quelle mesure les scores de 2017 permettent-ils d'anticiper ceux de 2022 ?
-On ajuste une régression linéaire ordinaire (OLS) par nuance présente en 2022, en utilisant comme variables explicatives les pourcentages de voix de chaque nuance en 2017.
+L'objectif de cette partie est de mesurer si le vote des électeurs est stable dans le temps. On se demande si un quartier qui vote d'une certaine façon en 2017 va voter de la même manière en 2022. L'idée est d'utiliser les scores de 2017 pour tenter de prédire mathématiquement les résultats de 2022, bureau de vote par bureau de vote. C'est une façon de voir si le "tempérament" politique d'un lieu reste le même malgré les années.
 :::
 
 ## Préparation des données
@@ -725,6 +723,8 @@ cat("Nuances 2017 (variables explicatives) :", length(nuances_17), "\n")
 cat("Nuances 2022 (variables réponse) :", length(nuances_22), "\n")
 ```
 
+Pour que l'analyse soit juste, nous transformons d'abord les nombres de voix en pourcentages par rapport au nombre d'inscrits. Cela permet de comparer des bureaux de tailles différentes sur une base commune de 0 à 100. Nous créons ensuite un fichier unique qui regroupe les scores de toutes les nuances de 2017 (ce qui nous aide à expliquer) et ceux de 2022 (ce que nous voulons deviner).
+
 ## Régression par nuance
 
 ```{r}
@@ -769,15 +769,13 @@ resultats
 ```
 
 ::: {.justify}
-Pour chaque nuance présente en 2022, on ajuste un modèle linéaire sur 80 % des bureaux et on évalue les prédictions sur les 20 % restants.
-Les R² sont globalement assez élevés pour les nuances qui existaient déjà en 2017 sous une étiquette proche (RN/FN, LFI/FG, LR…), ce qui montre que les scores passés ont un fort pouvoir prédictif.
-Pour les nuances nouvelles ou très marginales, la prédiction est logiquement moins bonne.
+Pour construire notre modèle, on divise d'abord nos bureaux de vote en deux groupes : un groupe d'"entraînement" avec 80 % des bureaux où l'ordinateur apprend les liens entre 2017 et 2022, et un groupe de "test" avec les 20 % restants que l'ordinateur ne voit jamais au début. Pour chaque parti en 2022, le modèle cherche la meilleure prédiction en utilisant les scores de toutes les nuances de 2017. Enfin, on demande à l'ordinateur de deviner les scores des bureaux du groupe test et on compare avec les vrais résultats de 2022 pour voir s'il a eu raison. Le succès est mesuré par le R² : plus ce score est proche de 1, plus le vote est considéré comme prévisible.
 :::
 
 ## Visualisation des coefficients
 
 ::: {.justify}
-Pour les 5 nuances les mieux prédites, on regarde quels candidats de 2009 ont des coefficients significatifs (p < 0,05). Pour `glucksmann_raphael`, les prédicteurs les plus forts sont `elisabeth_barbay` et `michel_barnier`. Pour `hayer_valerie`, `alain_mourguy` ressort nettement avec un coefficient positif élevé. Pour `bellamy_francois_xavier`, les coefficients sont plus faibles mais `sabine_herold` se distingue. Pour `toussaint_marie`, `rolande_perlican` a un coefficient très élevé (autour de 30-40), ce qui est à prendre avec précaution vu la largeur de son intervalle de confiance. Globalement, les candidats de 2009 les plus prédictifs pour 2024 appartiennent aux mêmes familles politiques, ce qui confirme la stabilité des profils de vote par bureau.
+Pour les 5 nuances les mieux prédites, on regarde quels candidats de 2009 ont des coefficients significatifs. Par exemple, pour glucksmann_raphael, les prédicteurs les plus forts sont issus des familles politiques proches en 2009. Globalement, les candidats passés les plus prédictifs appartiennent aux mêmes familles politiques, ce qui confirme que les quartiers gardent une identité de vote très stable malgré les changements de noms de partis ou de candidats.
 :::
 
 ## Visualisation prédit vs observé
@@ -816,8 +814,7 @@ ggplot(plot_data, aes(x = obs, y = pred)) +
 ```
 
 ::: {.justify}
-Pour les nuances les mieux prédites, les points s'alignent bien sur la diagonale.
-Les résidus restent néanmoins non négligeables dans certains bureaux, ce qui suggère qu'une partie des dynamiques locales échappe aux seuls scores de 2017, probablement des effets de candidats ou de recompositions locales difficiles à capter avec des nuances agrégées.
+Si les points noirs sont bien alignés sur la ligne rouge diagonale, cela signifie que notre prédiction est excellente et que le résultat de 2022 est quasiment le miroir de celui de 2017. Les points qui s'écartent de la ligne montrent les bureaux où il y a eu des surprises ou des changements que le passé ne permettait pas de prévoir, comme l'effet d'un nouveau candidat local ou une recomposition politique imprévue
 :::
 
 # Annexe
