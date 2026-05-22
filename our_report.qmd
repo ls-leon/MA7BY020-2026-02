@@ -725,7 +725,8 @@ cat("Pourcentage de voix de chaque nuances en 2017 (variables explicatives) :", 
 cat("Nuances 2022 (variables réponse) :", length(nuances_22), "\n")
 ```
 
-Pour que l'analyse soit juste, nous transformons d'abord les nombres de voix en pourcentages par rapport au nombre d'inscrits. Cela permet de comparer des bureaux de tailles différentes sur une base commune de 0 à 100. Nous créons ensuite un fichier unique qui regroupe les scores de toutes les nuances de 2017 (ce qui nous aide à expliquer) et ceux de 2022 (ce que nous voulons deviner).
+Pour que l'analyse soit juste, nous transformons d'abord les nombres de voix en pourcentages par rapport au nombre d'inscrits. Cela permet de comparer des bureaux de tailles différentes sur une base commune de 0 à 100.
+Pour évaluer le modèle, on sépare les données en train (80% : 35 856 bureaux) pour apprendre les coefficients et les 20% restants pour évaluer les prédictions sur des données jamais vues.
 
 ## Régression par nuance
 
