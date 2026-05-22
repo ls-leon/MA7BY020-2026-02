@@ -297,8 +297,10 @@ head(lg2022, 5)
 # III. Factorisation matricielle (ACP / SVD)
 
 ::: {.justify}
+
 Pour chaque tour d'élection, les données se présentent sous forme d'un tableau où les **lignes** sont les bureaux de vote et les **colonnes** le nombre de voix obtenus par chaque liste ou candidat.
 On centre et réduit ce tableau avant d'appliquer une **ACP** : ce qui revient à faire une SVD de la matrice centrée-réduite : pour identifier les principaux axes de variation politique entre les bureaux.
+Cela permet de visualiser plus facilement les tendances politiques et de repérer les bureaux de vote qui ont des comportements similaires.
 :::
 
 ## ACP, Européennes 2009 (Paris)
@@ -331,9 +333,8 @@ fviz_screeplot(pca_2009, addlabels = TRUE) +
   labs(title = "Variance expliquée : Européennes 2009 (Paris)")
 ```
 
-::: {.justify}
-PC1 concentre la majeure partie de la variance : elle capte le gradient politique dominant entre les bureaux de vote parisiens.
-Les composantes suivantes apportent chacune une part nettement moindre. PC1 explique à elle seule 20% de la variance totale contre 8.4% pour PC2. On peut donc se contenter des premières composantes pour résumer les données.
+::: {.justify} 
+L'axe 1 (PC1) est le plus important car il montre la plus grosse différence entre les quartiers de Paris (concentre lam ajeure partie de la variance). À lui seul, il résume le principal choc politique de la ville et explique 20 % de toutes les données. Les autres axes sont bien plus faibles, comme le deuxième (PC2) qui n'en capture que 8,4 %. On peut donc se limiter à ces deux premiers axes pour comprendre l'essentiel sans se perdre dans les détails.  
 :::
 
 ```{r}
@@ -348,7 +349,8 @@ fviz_pca_var(pca_2009, col.var = "contrib", repel = TRUE) +
 ```
 
 ::: {.justify}
-Presque toutes les flèches pointent vers la gauche sur Dim1 avec des contributions élevées (en bleu foncé). On voit deux groupes de listes qui s'opposent sur Dim2 : certaines tirent vers le haut, d'autres vers le bas. Les listes proches du centre contribuent peu et ne structurent pas vraiment les données.
+Ce graphique permet de voir comment les partis se regroupent dans les bureaux de vote parisiens.
+L'analyse des variables montre que la Dim1 (PC1) sépare les bureaux de vote selon leur soutien aux listes de gauche (PS, Verts, Front de Gauche), qui tirent fortement vers la gauche du graphique. La Dim2 (PC2) illustre une opposition entre le centre (MoDem), qui tire vers le haut, et les autres formations politiques. Les flèches courtes proches du centre représentent des listes ayant eu peu d'influence sur la structure globale des votes à Paris en 2009.
 :::
 
 ```{r}
