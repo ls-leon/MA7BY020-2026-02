@@ -10,7 +10,7 @@ format:
     link-external-newwindow: true
     df-print: kable
     number-sections: true
-    html-math-method: plain
+    html-math-method: mathjax
     self-contained: true
   pdf:
     output-file: our_report.pdf
@@ -334,7 +334,7 @@ fviz_screeplot(pca_2009, addlabels = TRUE) +
 ```
 
 ::: {.justify} 
-L'axe 1 (PC1) est le plus important car il montre la plus grosse différence entre les quartiers de Paris (concentre lam ajeure partie de la variance). À lui seul, il résume le principal choc politique de la ville et explique 20 % de toutes les données. Les autres axes sont bien plus faibles, comme le deuxième (PC2) qui n'en capture que 8,4 %. On peut donc se limiter à ces deux premiers axes pour comprendre l'essentiel sans se perdre dans les détails.  
+L'axe 1 (PC1) est le plus important car il montre la plus grosse différence entre les quartiers de Paris (concentre la majeure partie de la variance). À lui seul, il résume le principal choc politique de la ville et explique 20 % de toutes les données. Les autres axes sont bien plus faibles, comme le deuxième (PC2) qui n'en capture que 8,4 %. On peut donc se limiter à ces deux premiers axes pour comprendre l'essentiel sans se perdre dans les détails.  
 :::
 
 ```{r}
@@ -677,14 +677,16 @@ En comparant les silhouettes moyennes pour k=4, on obtient : K-means (0,499), CA
 
 # V. Régression linéaire
 
+## Présentation du modèle
+
 ::: {.justify}
-L'objectif de cette partie est de mesurer si le vote des électeurs est stable dans le temps. On se demande si un quartier qui vote d'une certaine façon en 2017 va voter de la même manière en 2022. L'idée est d'utiliser les scores de 2017 pour tenter de prédire mathématiquement les résultats de 2022, bureau de vote par bureau de vote. C'est une façon de voir si le "tempérament" politique d'un lieu reste le même malgré les années.
+L'objectif est de mesurer la **stabilité géographique du vote** : un bureau qui vote fortement pour une tendance en 2017 continue-t-il à le faire en 2022 ?
+
+On joint les deux tables législatives sur le triplet `(code_dep, code_com, bureau_vote)`. Chaque ligne de la table résultante correspond à un bureau de vote. Les colonnes suffixées `_lg17` sont les **variables explicatives** (scores 2017 en % des inscrits), les colonnes sans suffixe sont les **variables réponse** (scores 2022 en % des inscrits).
 :::
 
-## Préparation des données
-
 ```{r}
-#| label: regression_prep
+#| label: regression_build
 #| appendix: true
 #| eval: true
 #| echo: false
@@ -704,14 +706,12 @@ clean_keys <- function(df) {
   )
 }
 
-# Variables explicatives : pourcentages 2017
 X_17 <- lg2017 |>
   mutate(across(all_of(nuances_17), ~ . / pmax(inscrits, 1) * 100)) |>
   select(code_dep, code_com, bureau_vote, all_of(nuances_17)) |>
   clean_keys() |>
   rename_with(~ paste0(.x, "_lg17"), all_of(nuances_17))
 
-# Variables réponse : pourcentages 2022
 Y_22 <- lg2022 |>
   mutate(across(all_of(nuances_22), ~ . / pmax(inscrits, 1) * 100)) |>
   select(code_dep, code_com, bureau_vote, all_of(nuances_22)) |>
@@ -720,13 +720,50 @@ Y_22 <- lg2022 |>
 df_reg <- inner_join(X_17, Y_22, by = c("code_dep","code_com","bureau_vote")) |>
   na.omit()
 
+predictors <- paste0(nuances_17, "_lg17")
+predictors <- predictors[predictors %in% colnames(df_reg)]
+
 cat("Bureaux de vote disponibles :", nrow(df_reg), "\n")
-cat("Pourcentage de voix de chaque nuances en 2017 (variables explicatives) :", length(nuances_17), "\n")
+cat("Nuances 2017 (variables explicatives) :", length(nuances_17), "\n")
 cat("Nuances 2022 (variables réponse) :", length(nuances_22), "\n")
 ```
 
-Pour que l'analyse soit juste, nous transformons d'abord les nombres de voix en pourcentages par rapport au nombre d'inscrits. Cela permet de comparer des bureaux de tailles différentes sur une base commune de 0 à 100.
-Pour évaluer le modèle, on sépare les données en train (80% : 35 856 bureaux) pour apprendre les coefficients et les 20% restants pour évaluer les prédictions sur des données jamais vues.
+::: {.justify}
+Aperçu de la table jointe (`r nrow(df_reg)` bureaux, `r length(predictors)` prédicteurs `_lg17`, `r length(nuances_22)` variables réponse). Seules quelques colonnes sont affichées pour la lisibilité :
+:::
+
+```{r}
+#| label: regression_apercu
+#| appendix: true
+#| eval: true
+#| echo: false
+#| message: false
+#| warning: false
+
+df_reg |>
+  select(code_dep, code_com, bureau_vote,
+         all_of(head(predictors, 3)),
+         all_of(head(nuances_22, 3))) |>
+  head(5)
+```
+
+### Formulation
+
+::: {.justify}
+Pour chaque nuance $k$ de 2022, on ajuste un modèle de régression linéaire multiple en utilisant les scores de toutes les nuances de 2017 comme prédicteurs :
+
+$$y_{ik} = \beta_0^{(k)} + \sum_{j=1}^{p} \beta_j^{(k)} \, x_{ij} + \varepsilon_{ik}$$
+
+où $y_{ik}$ est le pourcentage de voix pour la nuance $k$ en 2022 au bureau $i$, $x_{ij}$ le pourcentage de voix pour la nuance $j$ en 2017, et $\varepsilon_{ik}$ le résidu. En notation matricielle, avec $X \in \mathbb{R}^{n \times (p+1)}$ la matrice des prédicteurs augmentée d'une colonne de 1 :
+
+$$y_k = X \, \beta^{(k)} + \varepsilon^{(k)}, \qquad \hat{\beta}^{(k)} = (X^T X)^{-1} X^T y_k$$
+
+On évalue chaque modèle sur l'ensemble test (20 % des bureaux, jamais vus à l'entraînement) via :
+
+$$\text{RMSE} = \sqrt{\frac{1}{n_{test}} \sum_{i} (y_{ik} - \hat{y}_{ik})^2} \qquad R^2 = 1 - \frac{\sum_{i}(y_{ik} - \hat{y}_{ik})^2}{\sum_{i}(y_{ik} - \bar{y}_k)^2}$$
+
+Un $R^2$ proche de 1 signifie que le tempérament politique du bureau est resté stable entre 2017 et 2022. On sépare les données en un ensemble d'entraînement (80 %, soit `r floor(0.8 * nrow(df_reg))` bureaux) et un ensemble de test (20 %, soit `r nrow(df_reg) - floor(0.8 * nrow(df_reg))` bureaux).
+:::
 
 ## Régression par nuance
 
@@ -737,9 +774,6 @@ Pour évaluer le modèle, on sépare les données en train (80% : 35 856 bureaux
 #| echo: false
 #| message: false
 #| warning: false
-
-predictors <- paste0(nuances_17, "_lg17")
-predictors <- predictors[predictors %in% colnames(df_reg)]
 
 set.seed(42)
 n   <- nrow(df_reg)
@@ -772,13 +806,7 @@ resultats
 ```
 
 ::: {.justify}
-Pour construire notre modèle, on divise d'abord nos bureaux de vote en deux groupes : un groupe d'"entraînement" avec 80 % des bureaux où l'ordinateur apprend les liens entre 2017 et 2022, et un groupe de "test" avec les 20 % restants que l'ordinateur ne voit jamais au début. Pour chaque parti en 2022, le modèle cherche la meilleure prédiction en utilisant les scores de toutes les nuances de 2017. Enfin, on demande à l'ordinateur de deviner les scores des bureaux du groupe test et on compare avec les vrais résultats de 2022 pour voir s'il a eu raison. Le succès est mesuré par le R² : plus ce score est proche de 1, plus le vote est considéré comme prévisible.
-:::
-
-## Visualisation des coefficients
-
-::: {.justify}
-Pour les 5 nuances les mieux prédites, on regarde quels candidats de 2009 ont des coefficients significatifs. Par exemple, pour glucksmann_raphael, les prédicteurs les plus forts sont issus des familles politiques proches en 2009. Globalement, les candidats passés les plus prédictifs appartiennent aux mêmes familles politiques, ce qui confirme que les quartiers gardent une identité de vote très stable malgré les changements de noms de partis ou de candidats.
+Chaque ligne du tableau correspond à un modèle distinct : on prédit le score de la nuance $k$ en 2022 à partir de l'ensemble des scores de 2017. Un $R^2$ élevé indique que la géographie du vote pour cette nuance est restée stable entre les deux scrutins ; un $R^2$ faible signale au contraire une recomposition politique importante que le passé ne permettait pas d'anticiper.
 :::
 
 ## Visualisation prédit vs observé
@@ -817,7 +845,7 @@ ggplot(plot_data, aes(x = obs, y = pred)) +
 ```
 
 ::: {.justify}
-Si les points noirs sont bien alignés sur la ligne rouge diagonale, cela signifie que notre prédiction est excellente et que le résultat de 2022 est quasiment le miroir de celui de 2017. Les points qui s'écartent de la ligne montrent les bureaux où il y a eu des surprises ou des changements que le passé ne permettait pas de prévoir, comme l'effet d'un nouveau candidat local ou une recomposition politique imprévue
+Pour chacune des 4 nuances les mieux prédites, on compare les valeurs observées en 2022 (axe horizontal) aux valeurs prédites par le modèle (axe vertical). La droite rouge en pointillés représente la prédiction parfaite ($\hat{y} = y$). Plus les points noirs s'alignent sur cette diagonale, plus le vote 2022 est le miroir fidèle du vote 2017. Les points qui s'en écartent correspondent à des bureaux où il y a eu un changement que le passé ne permettait pas d'anticiper : effet d'un nouveau candidat local, recomposition d'alliances, ou mobilisation différentielle de l'électorat.
 :::
 
 # Annexe
